@@ -1,3 +1,4 @@
+
 <!doctype html>
 <html lang="it">
 <head>
@@ -455,7 +456,7 @@
       height: 140px;
       border-radius: 0.6rem;
       background: #000;
-      touch-action: none; /* evita scroll durante la firma */
+      touch-action: none;
     }
 
     .signature-actions {
@@ -639,7 +640,10 @@
       <section class="card">
         <div class="history-header">
           <h2>Storico bollettini</h2>
-          <div style="display:flex; gap:0.35rem;">
+          <div style="display:flex; gap:0.35rem; flex-wrap:wrap;">
+            <button type="button" class="btn btn-sm btn-outline" id="importBtn">
+              📥 Importa JSON
+            </button>
             <button type="button" class="btn btn-sm btn-outline" id="exportBtn">
               ⬇️ Esporta JSON
             </button>
@@ -654,6 +658,9 @@
         <div class="history-list" id="ticketsList">
           <!-- Bollettini dinamici -->
         </div>
+
+        <!-- input file nascosto per import JSON -->
+        <input type="file" id="importFileInput" accept="application/json" style="display:none;" />
       </section>
     </main>
 
@@ -678,7 +685,6 @@
       let startMinutes = sh * 60 + sm;
       let endMinutes = eh * 60 + em;
       if (Number.isNaN(startMinutes) || Number.isNaN(endMinutes)) return 0;
-      // Se fine < inizio, assumiamo passaggio a giorno successivo
       if (endMinutes < startMinutes) {
         endMinutes += 24 * 60;
       }
@@ -731,7 +737,6 @@
       tr.appendChild(tdTotal);
       tr.appendChild(tdActions);
 
-      // Eventi
       function recalcRow() {
         const qty = parseFloat(inputQty.value) || 0;
         const price = parseFloat(inputPrice.value) || 0;
@@ -1000,6 +1005,53 @@
       URL.revokeObjectURL(url);
     }
 
+    // ---- IMPORT JSON ----
+    function handleImportFile(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        try {
+          const text = e.target.result;
+          const parsed = JSON.parse(text);
+
+          let importedTickets = [];
+          if (Array.isArray(parsed)) {
+            importedTickets = parsed;
+          } else if (parsed && typeof parsed === "object") {
+            importedTickets = [parsed];
+          } else {
+            alert("Formato JSON non valido.");
+            return;
+          }
+
+          const existing = loadTickets();
+          const mergedById = new Map();
+
+          existing.forEach((t) => {
+            mergedById.set(t.id || `${t.client}-${t.date}-${t.startTime}`, t);
+          });
+
+          importedTickets.forEach((t) => {
+            const key = t.id || `${t.client}-${t.date}-${t.startTime}`;
+            mergedById.set(key, t);
+          });
+
+          const merged = Array.from(mergedById.values());
+          saveTickets(merged);
+          renderTicketsList();
+          alert(`Import completato: ${importedTickets.length} bollettino/i aggiunto/i.`);
+        } catch (err) {
+          console.error("Errore import JSON", err);
+          alert("Errore durante l'import. Verifica che il file sia stato esportato dal bollettario.");
+        } finally {
+          event.target.value = "";
+        }
+      };
+      reader.readAsText(file, "utf-8");
+    }
+
     // ---- GESTIONE FIRMA ----
     let signatureDirty = false;
 
@@ -1012,7 +1064,7 @@
         const ratio = window.devicePixelRatio || 1;
         canvas.width = rect.width * ratio;
         canvas.height = rect.height * ratio;
-        ctx.scale(ratio, ratio);
+        ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
         ctx.fillStyle = "#000000";
         ctx.fillRect(0, 0, rect.width, rect.height);
         ctx.lineWidth = 2;
@@ -1192,7 +1244,6 @@
       doc.text(`Totale intervento: ${formatMoney(data.totals.grandTotal)}`, 10, y);
       y += 10;
 
-      // Note interne (le puoi usare tu, o eliminarle dal PDF se vuoi)
       if (data.notes) {
         doc.setFontSize(11);
         doc.text("Note interne", 10, y);
@@ -1203,13 +1254,11 @@
         y += notesLines.length * 5 + 8;
       }
 
-      // Firma cliente
       doc.setFontSize(11);
       doc.text("Firma cliente", 10, y);
       y += 5;
 
       if (data.signature) {
-        // Spazio per la firma
         const imgWidth = 60;
         const imgHeight = 25;
         doc.addImage(data.signature, "PNG", 10, y, imgWidth, imgHeight);
@@ -1229,20 +1278,16 @@
     }
 
     document.addEventListener("DOMContentLoaded", () => {
-      // Precompila data con oggi
       const today = new Date().toISOString().slice(0, 10);
       document.getElementById("date").value = today;
 
-      // Righe materiali iniziali
       const body = document.getElementById("materialsBody");
       for (let i = 0; i < 3; i++) {
         body.appendChild(createMaterialRow());
       }
 
-      // Firma
       setupSignaturePad();
 
-      // Eventi
       document
         .getElementById("addMaterialRow")
         .addEventListener("click", () => {
@@ -1273,9 +1318,9 @@
       document
         .getElementById("resetFormBtn")
         .addEventListener("click", () => {
-          const ok = confirm("Vuoi davvero svuotare tutti i campi?");
-          if (ok) resetForm();
-        });
+        const ok = confirm("Vuoi davvero svuotare tutti i campi?");
+        if (ok) resetForm();
+      });
 
       document
         .getElementById("exportBtn")
@@ -1296,11 +1341,19 @@
         .getElementById("generatePdfBtn")
         .addEventListener("click", generatePdfFromForm);
 
-      // Rendering iniziale
+      // Import JSON
+      const importBtn = document.getElementById("importBtn");
+      const importFileInput = document.getElementById("importFileInput");
+
+      importBtn.addEventListener("click", () => {
+        importFileInput.click();
+      });
+
+      importFileInput.addEventListener("change", handleImportFile);
+
       updateTotals();
       renderTicketsList();
 
-      // PWA: registra service worker se supportato
       if ("serviceWorker" in navigator) {
         navigator.serviceWorker
           .register("./service-worker.js")
